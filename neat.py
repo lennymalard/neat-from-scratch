@@ -42,6 +42,24 @@ def sigmoid(x):
     clamped_x = max(-700.0, min(700.0, x)) # Values outside this range are effectively 0 or 1
     return 1 / (1 + math.exp(-clamped_x))
 
+def tanh(x):
+    """
+    Hyperbolic tangent (tanh) activation function.
+
+    Computes the hyperbolic tangent of the input value: tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x)).
+
+    Parameters
+    ----------
+    x : float
+        Input value.
+
+    Returns
+    -------
+    float
+        tanh output value, ranging between -1 and 1.
+    """
+    return math.tanh(x)
+
 def select_activation(name):
     """
     Selects and returns an activation function based on its name.
@@ -49,7 +67,7 @@ def select_activation(name):
     Parameters
     ----------
     name : str
-        Name of the activation function (e.g., 'relu', 'sigmoid').
+        Name of the activation function (e.g., 'relu', 'sigmoid', 'tanh').
 
     Returns
     -------
@@ -65,6 +83,8 @@ def select_activation(name):
         return relu
     elif name == 'sigmoid':
         return sigmoid
+    elif name == 'tanh':
+        return tanh
     else:
         raise ValueError(f'Unknown activation function: {name}')
 
@@ -90,10 +110,18 @@ class NEATConfig:
         The maximum weight for the hidden nodes.
     min_weight : float
         The minimum weight for the hidden nodes.
+    min_bias : float
+        The minimum bias for the nodes.
+    max_bias : float
+        The maximum bias for the nodes.
     add_node_mutation_prob : float
         The probability of adding a new node during mutation.
     add_conn_mutation_prob : float
         The probability of adding a new connection during mutation.
+    remove_conn_mutation_prob : float
+        The probability of removing (disabling) an existing connection during mutation.
+    remove_node_mutation_prob : float
+        The probability of removing (disabling connections of) an existing hidden node during mutation.
     num_elites : int
         The number of best genomes from each species to be carried over directly
         to the next generation without mutation (elitism).
@@ -109,6 +137,21 @@ class NEATConfig:
     species_threshold : float
         The compatibility distance threshold used for speciation. Genomes with
         a distance below this threshold are considered to be in the same species.
+        This value can be adjusted dynamically if `adaptive_threshold` > 0.
+    min_species_threshold : float
+        The minimum value the `species_threshold` can be adjusted to when using
+        adaptive thresholding. Prevents the threshold from becoming too low.
+    max_species_threshold : float
+        The maximum value the `species_threshold` can be adjusted to when using
+        adaptive thresholding. Prevents the threshold from becoming too high.
+    adaptive_threshold : float
+        The step size used to adjust the `species_threshold` based on the number
+        of species relative to the target. If 0, the threshold is fixed.
+        If > 0, threshold increases if number of species > target, decreases if < target.
+    target_species_number : int
+        The desired number of species in the population when using adaptive
+        thresholding. The `species_threshold` is adjusted to try and maintain
+        this number of species.
     c1 : float
         Coefficient for excess genes in the compatibility distance calculation.
     c2 : float
@@ -127,14 +170,22 @@ class NEATConfig:
             out_node_activation='sigmoid',
             max_weight=1.0,
             min_weight=-1.0,
+            min_bias=-1.0,
+            max_bias=1.0,
             add_node_mutation_prob=0.05,
             add_conn_mutation_prob=0.08,
+            remove_conn_mutation_prob=0.02,
+            remove_node_mutation_prob=0.01,
             num_elites=1,
             selection_share=0.2,
             sigma=0.1,
             perturb_prob=0.8,
             reset_prob=0.1,
             species_threshold=3.0,
+            min_species_threshold = 0.15,
+            max_species_threshold = 15.0,
+            target_species_number=15,
+            adaptive_threshold=0.0,
             c1=1.0,
             c2=1.0,
             c3=0.4,
@@ -146,6 +197,8 @@ class NEATConfig:
         self.genome_shape = genome_shape
         self.add_node_mutation_prob = add_node_mutation_prob
         self.add_conn_mutation_prob = add_conn_mutation_prob
+        self.remove_node_mutation_prob = remove_node_mutation_prob
+        self.remove_conn_mutation_prob = remove_conn_mutation_prob
         self.sigma = sigma
         self.perturb_prob = perturb_prob
         self.reset_prob = reset_prob
@@ -153,7 +206,13 @@ class NEATConfig:
         self.out_node_activation = out_node_activation
         self.max_weight = max_weight
         self.min_weight = min_weight
+        self.min_bias = min_bias
+        self.max_bias = max_bias
         self.species_threshold = species_threshold
+        self.min_species_threshold = min_species_threshold
+        self.max_species_threshold = max_species_threshold
+        self.adaptive_threshold = adaptive_threshold
+        self.target_species_number = target_species_number
         self.population_size = population_size
         self.c1 = c1
         self.c2 = c2
@@ -252,9 +311,9 @@ class Node:
     """
     Represents a node gene in a genome.
 
-    Nodes can be of type 'input', 'output', or 'hidden'. Each node has a unique ID
-    and potentially an activation function. Its value is computed during the
-    network's forward pass.
+    Nodes can be of type 'input', 'output', or 'hidden'. Each node has a unique ID,
+    a bias value (except input nodes), and potentially an activation function.
+    Its value is computed during the network's forward pass.
 
     Attributes
     ----------
@@ -268,6 +327,9 @@ class Node:
     value : float
         The computed output value of the node after activation during the forward pass.
         Initialized to 0.0.
+    bias : float
+        The bias value added to the weighted sum before activation. Input nodes have a bias of 0.0.
+        Initialized randomly for hidden and output nodes.
     """
     def __init__(self, type, id, activation=None):
         """
@@ -280,10 +342,12 @@ class Node:
         id : int
             The unique ID for the node.
         activation : str, optional
-            The name of the activation function. Defaults to None.
+            The name of the activation function. Defaults to None. Input nodes
+            typically have None.
         """
         self.type = type
         self.value = 0.0 # Runtime value, reset before each forward pass
+        self.bias = uniform(-1,1) if type != 'input' else 0.0 # Initialize bias randomly, 0 for inputs
         self.activation = activation
         self.id = id
 
@@ -297,9 +361,10 @@ class Node:
         Returns
         -------
         Node
-            A new Node object with identical attributes (type, id, activation).
+            A new Node object with identical attributes (type, id, activation, bias).
         """
         node = Node(self.type, self.id, self.activation)
+        node.bias = self.bias
         # Value is stateful and shouldn't be copied directly, reset in new node
         return node
 
@@ -326,9 +391,9 @@ class Node:
         Returns
         -------
         str
-            String detailing the node's ID, type, and activation function.
+            String detailing the node's ID, type, activation function, and bias.
         """
-        return f"Node(id={self.id}, type={self.type}, act={self.activation})"
+        return f"Node(id={self.id}, type={self.type}, act={self.activation}, bias={self.bias:.2f})"
 
 class Genome:
     """
@@ -518,6 +583,58 @@ class Genome:
         conn2 = Connection(node, out_node, conn2_id)
         conn2.weight = old_conn.weight # Standard practice: weight of new_node->output inherits old weight
         self.connections[conn2.id] = conn2 # Add the second new connection
+
+    def remove_node(self, node_id):
+        """
+        Disables all connections associated with a specific hidden node,
+        effectively removing it from the active network graph.
+
+        This method only affects hidden nodes. Input and output nodes cannot
+        be removed this way as they define the genome's interface. Disabling
+        connections is preferred over deleting the node object to preserve
+        the genome's history and structure for crossover and compatibility
+        calculations.
+
+        Parameters
+        ----------
+        node_id : int
+            The ID of the hidden node to remove (by disabling its connections).
+        """
+        node = self.nodes.get(node_id)
+
+        if node is None or node.type != 'hidden':
+            return
+
+        for conn in list(self.connections.values()):
+            if conn.in_node.id == node_id or conn.out_node.id == node_id:
+                if conn.enabled:
+                    conn.enabled = False
+
+    def remove_connection(self, conn_id):
+        """
+        Disables a specific connection gene based on its innovation ID,
+        unless it is a direct connection from an input node to an output node.
+
+        Disabling is preferred over deletion in NEAT to preserve historical
+        markers and genome structure for compatibility and crossover. A disabled
+        connection is ignored during the network's forward pass.
+
+        Parameters
+        ----------
+        conn_id : int
+            The innovation ID of the connection to potentially disable.
+        """
+        connection = self.connections.get(conn_id)
+
+        if connection is None:
+            return
+
+        # Prevent disabling direct input -> output connections
+        if connection.in_node.type == 'input' and connection.out_node.type == 'output':
+            return
+
+        if connection.enabled:
+            connection.enabled = False
 
     def check_connection(self, in_node_id, out_node_id):
         """
@@ -777,6 +894,46 @@ class Genome:
 
             # If loop finishes without adding, max_try was reached or no valid connections possible
 
+    def remove_node_mutation(self, prob=0.01):
+        """
+        Applies the "remove node" mutation with a given probability.
+
+        Randomly selects a hidden node and disables its associated connections.
+
+        Parameters
+        ----------
+        prob : float, optional
+            The probability of attempting this mutation. Defaults to 0.01.
+        """
+        prob = self.config.remove_node_mutation_prob if self.config else prob
+
+        if random() < prob:
+            hidden_nodes = [n for n in self.nodes.values() if n.type == 'hidden']
+            if not hidden_nodes:
+                return
+
+            node_to_remove = choice(hidden_nodes)
+            self.remove_node(node_to_remove.id)
+
+    def remove_connection_mutation(self, prob=0.02):
+        """
+        Applies the "remove connection" mutation with a given probability.
+
+        Randomly selects an existing connection and attempts to disable it.
+        Logic to prevent disabling input->output is within remove_connection.
+
+        Parameters
+        ----------
+        prob : float, optional
+            The probability of attempting this mutation. Defaults to 0.02.
+        """
+        prob = self.config.remove_conn_mutation_prob if self.config else prob
+
+        if random() < prob and self.connections:
+            conn_id_to_remove = choice(list(self.connections.keys()))
+            self.remove_connection(conn_id_to_remove)
+
+
     def weight_mutation(self, sigma=0.1, perturb_prob=0.8, reset_prob=0.1, min_weight=-1.0, max_weight=1.0):
         """
         Applies weight mutations to the connections in the genome.
@@ -823,17 +980,68 @@ class Genome:
                 # Clamp the weight to stay within the [-1, 1] range
                 conn.weight = max(min_weight, min(max_weight, conn.weight))
 
+    def bias_mutation(self, sigma=0.1, perturb_prob=0.8, reset_prob=0.1, min_bias=-1.0, max_bias=1.0):
+        """
+        Applies bias mutations to the nodes in the genome.
+
+        Each node has a chance (`perturb_prob`) to be mutated. If selected,
+        it has a further chance (`reset_prob`) to have its bias completely reset
+        to a new random value. Otherwise, its bias is perturbed by adding
+        Gaussian noise (mean 0, std dev `sigma`). Biases are clamped to [min_bias, max_bias].
+
+        Parameters
+        ----------
+        sigma : float, optional
+            Standard deviation for Gaussian noise perturbation. Defaults to 0.1.
+            Overridden by `self.config.sigma` if available.
+        perturb_prob : float, optional
+            Probability of perturbing a node's bias. Defaults to 0.8.
+            Overridden by `self.config.perturb_prob` if available.
+        reset_prob : float, optional
+            Probability of resetting the bias (given perturbation occurs). Defaults to 0.1.
+            Overridden by `self.config.reset_prob` if available.
+        max_bias : float, optional
+            Max bias reachable by the node. Defaults to 1.0.
+        min_bias : float, optional
+            Min bias reachable by the node. Defaults to -1.0.
+        """
+        # Use parameters from config if available
+        sigma = self.config.sigma if self.config is not None else sigma
+        perturb_prob = self.config.perturb_prob if self.config is not None else perturb_prob
+        reset_prob = self.config.reset_prob if self.config is not None else reset_prob
+        min_bias = self.config.min_bias if self.config is not None else min_bias
+        max_bias = self.config.max_bias if self.config is not None else max_bias
+
+        mutable_nodes = [n for n in self.nodes.values() if n.type != 'input']
+
+        # Iterate through all node in the genome
+        for node in mutable_nodes:
+            # Check if this node should be perturbed
+            if random() < perturb_prob:
+                # Check if the bias should be reset or perturbed with noise
+                if random() < reset_prob:
+                    # Reset bias to a new random value in [-1, 1]
+                    node.bias = uniform(-1, 1)
+                else:
+                    # Perturb bias by adding Gaussian noise
+                    node.bias += gauss(0, sigma)
+                # Clamp the bias to stay within the [-1, 1] range
+                node.bias = max(min_bias, min(max_bias, node.bias))
+
     def mutate(self):
         """
-        Applies all types of mutations (weight, add node, add connection)
+        Applies all types of mutations (weight, bias, add node, add connection, remove node, remove connection)
         to the genome based on their respective probabilities defined in the config
         or default values.
         """
         # Order can matter slightly, e.g., mutating weights before structure changes
         # is common, but either order is acceptable.
         self.weight_mutation()
+        self.bias_mutation()
         self.add_node_mutation()
         self.add_connection_mutation()
+        self.remove_connection_mutation()
+        self.remove_node_mutation()
 
     def topological_sort(self):
         """
@@ -981,12 +1189,12 @@ class Genome:
                      # Select the appropriate activation function
                      activation_function = select_activation(node.activation)
                      # Compute and store the node's output value
-                     node.value = float(activation_function(weighted_sum))
+                     node.value = float(activation_function(weighted_sum+node.bias))
                 else:
                      # No activation function
                      # Currently, only hidden/output nodes are processed here, and they should have activations.
                      # If nodes without activation are possible, this handles them.
-                     node.value = float(weighted_sum)
+                     node.value = float(weighted_sum+node.bias)
 
         # Collect output values from output nodes
         output_values = []
@@ -1024,7 +1232,7 @@ class Genome:
 
         # Create input nodes (IDs 0 to shape[0]-1)
         for i in range(shape[0]):
-            # Input nodes typically have no activation function
+            # Input nodes typically have no activation function and bias 0
             in_node = Node('input', i, activation=None)
             in_nodes.append(in_node)
             self.nodes[in_node.id] = in_node
@@ -1032,6 +1240,7 @@ class Genome:
         # Create output nodes (IDs shape[0] to shape[0]+shape[1]-1)
         for j in range(shape[1]):
             out_node_id = shape[0] + j
+            # Output nodes have activation and random initial bias
             out_node = Node('output', out_node_id, activation=activation)
             out_nodes.append(out_node)
             self.nodes[out_node_id] = out_node
@@ -1078,9 +1287,11 @@ class Species:
     """
     Represents a species in the population.
 
-    A species groups genetically similar genomes together. It has a representative
-    genome against which new genomes are compared for compatibility. Species help
-    protect innovation by allowing genomes to compete primarily within their niche.
+    A species groups genetically similar genomes together based on a compatibility
+    threshold calculated using `calculate_compatibility`. It has a representative
+    genome against which new genomes are compared. Species help protect innovation
+    by allowing genomes to compete primarily within their niche before competing
+    globally based on adjusted fitness.
 
     Attributes
     ----------
@@ -1088,29 +1299,21 @@ class Species:
         A reference to the main configuration object.
     members : list[Genome]
         A list of Genome objects belonging to this species.
-    threshold : float
-        The compatibility threshold used for this species. Typically inherited
-        from the global config.
     representative : Genome or None
-        A genome chosen (the first one added)to represent the species for
-        compatibility checks.
+        A genome chosen (typically the first one added or randomly selected later)
+        to represent the species for compatibility checks when speciating new genomes.
     """
-    def __init__(self, threshold = 3.0, config=None):
+    def __init__(self, config=None):
         """
         Initializes a new, empty species.
 
         Parameters
         ----------
-        threshold : float, optional
-            The compatibility threshold. Defaults to 3.0. Overridden by
-            `config.species_threshold` if `config` is provided.
         config : NEATConfig, optional
             The configuration object. Defaults to None.
         """
         self.config = config
         self.members = [] # Start with no members
-        # Use threshold from config if available, otherwise use provided default
-        self.threshold = config.species_threshold if config is not None else threshold
         self.representative = None # Representative is set when the first member is added
 
     def adjust_fitness(self):
@@ -1165,21 +1368,27 @@ class Species:
         f_avg = sum(fitnesses) / len(fitnesses)
         f_max = max(fitnesses)
 
-        # Handle edge case where all fitnesses are equal
-        if f_max == f_avg:
-            # Avoid division by zero. Assign a default scaled fitness (e.g., 1.0)
-            # or simply leave fitness as is if scaling isn't meaningful here.
+        # Handle edge case where all fitnesses are equal or f_max <= f_avg (possible with sharing)
+        if f_max <= f_avg:
+            # Avoid division by zero or nonsensical scaling.
+            # Assign a uniform positive fitness or leave as is.
             for g in self.members:
-                g.fitness = 1.0 # Assign uniform scaled fitness
+                g.fitness = max(1.0, g.fitness) # Ensure positive fitness, e.g., 1.0
             return self.members
 
         # Calculate scaling parameters a and b
-        a = (c - 1.0) * f_avg / (f_max - f_avg)
-        b = f_avg * (1.0 - a)
+        # Ensure denominator is not zero
+        if f_max - f_avg == 0: # Should be covered by f_max <= f_avg check, but for safety
+             a = 1.0
+             b = 0.0
+        else:
+             a = (c - 1.0) * f_avg / (f_max - f_avg)
+             b = f_avg * (1.0 - a)
 
-        # Apply the linear scaling transformation
+        # Apply the linear scaling transformation, ensuring fitness doesn't become negative if 'a' is negative
         for g in self.members:
-            g.fitness = a * g.fitness + b
+            scaled_fitness = a * g.fitness + b
+            g.fitness = max(0.0, scaled_fitness) # Prevent negative fitness after scaling
 
         return self.members
 
@@ -1203,7 +1412,7 @@ class Species:
         f_min = min(g.fitness for g in self.members)
         # Add a small epsilon to ensure minimum is strictly positive
         epsilon = 1e-7
-        offset = -f_min + epsilon
+        offset = -f_min + epsilon if f_min < epsilon else 0.0 # Only offset if needed
 
         # Apply the offset to all members
         for genome in self.members:
@@ -1226,7 +1435,7 @@ class Species:
 
 class Population:
     """
-    Manages the entire population of genomes, including speciation, reproduction
+    Manages the entire population of genomes, including speciation, reproduction,
     and tracking of innovation numbers.
 
     Attributes
@@ -1239,6 +1448,14 @@ class Population:
         The target size of the population.
     species : list[Species]
         A list containing all the Species objects in the current generation.
+    species_threshold : float
+        The current compatibility distance threshold used for speciation.
+        Can be adjusted dynamically via `adjust_species_threshold`.
+    adaptive_threshold : float
+        The step size for adjusting `species_threshold` based on the number of species
+        relative to `target_species_number`. If 0, threshold is fixed.
+    target_species_number : int
+        The desired number of species for adaptive thresholding.
     conn_id : int
         The highest innovation number assigned to a connection gene so far.
         Used to assign unique IDs to new connections. Initialized considering initial genome.
@@ -1253,25 +1470,34 @@ class Population:
         The list of all Genome objects in the current population. After speciation,
         these genomes are also references within the `species` list members.
     """
-    def __init__(self, config=None, genome_shape=(1,1), size=100):
+    def __init__(self, config=None, genome_shape=(1,1), size=100, adaptive_threshold=0.0, target_species_number=15):
         """
         Initializes the population.
 
         Parameters
         ----------
+        config : NEATConfig, optional
+            The configuration object. If provided, its settings are used.
+            Defaults to None.
         genome_shape : tuple[int, int], optional
             The (input, output) shape for initial genomes. Defaults to (1, 1).
             Overridden by `config.genome_shape` if `config` is provided.
         size : int, optional
             The target population size. Defaults to 100.
             Overridden by `config.population_size` if `config` is provided.
-        config : NEATConfig, optional
-            The configuration object. If provided, its settings are used.
-            Defaults to None.
+        adaptive_threshold : float, optional
+            The step size for adaptive threshold adjustment. Defaults to 0.0 (fixed threshold).
+            Overridden by `config.adaptive_threshold` if `config` is provided.
+        target_species_number : int, optional
+            The target number of species for adaptive thresholding. Defaults to 15.
+            Overridden by `config.target_species_number` if `config` is provided.
         """
         self.config = config
-        # Determine shape and size from config or parameters
+        # Determine shape, size, and threshold parameters from config or defaults
         self.genome_shape = config.genome_shape if config is not None else genome_shape
+        self.species_threshold = config.species_threshold if config is not None else 3.0 # Default if no config
+        self.adaptive_threshold = config.adaptive_threshold if config is not None else adaptive_threshold
+        self.target_species_number = config.target_species_number if config is not None else target_species_number
         self.size = config.population_size if config is not None else size
         self.species = [] # List of species in the population
         # Initialize innovation counters. Start conn_id at -1 so first ID is 0.
@@ -1559,7 +1785,8 @@ class Population:
         n2 = len(genome2.connections)
 
         # N is the number of genes in the larger genome (or 1 if both are empty)
-        # Avoid division by zero if genomes are small (e.g., N=1 if max(n1,n2) < 20)
+        # Normalize factor N, often set to 1 if genome size is small (e.g., < 20) in some NEAT variations.
+        # Here, we simply use max(1, max(n1, n2))
         N = max(1.0, float(max(n1, n2))) # Normalization factor
 
         # Count total excess and disjoint genes
@@ -1580,6 +1807,57 @@ class Population:
         delta = (c1 * E / N) + (c2 * D / N) + (c3 * W)
         # print(f"Delta calculation: E={E}, D={D}, W={W:.4f}, N={N}, c1={c1}, c2={c2}, c3={c3} -> delta={delta:.4f}")
         return delta
+
+    def adjust_species_threshold(self, min_species_threshold=0.15, max_species_threshold=15.0):
+        """
+        Adjusts the global species compatibility threshold (`self.species_threshold`)
+        based on the current number of species relative to the target number,
+        if adaptive thresholding is enabled (`self.config.adaptive_threshold > 0`).
+
+        The threshold is increased if the number of species is above the target,
+        making it harder to form new species and encouraging merging. It is
+        decreased if the number is below the target, making it easier to form
+        new species. The adjustment step size is controlled by `adaptive_threshold`.
+        The threshold is clamped between `min_species_threshold` and `max_species_threshold`.
+
+        Parameters
+        ----------
+        min_species_threshold : float, optional
+            Minimum allowed threshold value. Defaults to 0.15. Overridden by
+            `self.config.min_species_threshold` if available.
+        max_species_threshold : float, optional
+            Maximum allowed threshold value. Defaults to 15.0. Overridden by
+            `self.config.max_species_threshold` if available.
+        """
+        # Get limits from config if available
+        min_species_threshold = self.config.min_species_threshold if self.config is not None else min_species_threshold
+        max_species_threshold = self.config.max_species_threshold if self.config is not None else max_species_threshold
+
+        # Get the current number of active species
+        num_species = len(self.species)
+
+        # Check if adaptive thresholding is enabled
+        if self.adaptive_threshold > 0.0:
+            # Adjust threshold based on species count vs target
+            if num_species > self.target_species_number:
+                # Increase threshold to reduce species count
+                self.species_threshold += self.adaptive_threshold
+                # print(f"Num Species: {num_species} (>{self.target_species_number}). Threshold increased to {self.species_threshold:.3f}")
+            elif num_species < self.target_species_number:
+                # Decrease threshold to increase species count
+                self.species_threshold -= self.adaptive_threshold
+                # print(f"Num Species: {num_species} (<{self.target_species_number}). Threshold decreased to {self.species_threshold:.3f}")
+
+            # Clamp the threshold within the defined min/max bounds
+            self.species_threshold = max(min_species_threshold, min(self.species_threshold, max_species_threshold))
+
+        elif self.adaptive_threshold == 0.0:
+            # Adaptive thresholding is disabled, do nothing.
+            pass
+
+        else:
+            # This case should not happen if config validation is done properly
+            raise ValueError("Invalid adaptive threshold value. Must be >= 0.")
 
     def speciate(self, genome):
         """
@@ -1620,7 +1898,7 @@ class Population:
                 delta = self.calculate_compatibility(species_obj.representative, genome)
 
                 # If distance is below threshold, add genome to this species
-                if delta < species_obj.threshold:
+                if delta < self.species_threshold:
                     species_obj.members.append(genome)
                     assigned = True
                     break # Genome assigned, no need to check other species
@@ -1722,8 +2000,8 @@ class Population:
                      # Ensure offspring count doesn't go below zero
                      species_data[idx_to_adjust]['num_offspring'] = max(0, species_data[idx_to_adjust]['num_offspring'])
         else:
-            # Handle case where total average fitness is zero or negative
-            print(f"Warning: Total average adjusted fitness ({total_average_fitness:.2f}) is zero or negative. Allocating offspring equally among {len(species_data)} species.")
+            # Handle case where total average fitness is zero or negative (e.g., all fitnesses shared to near zero)
+            # print(f"Warning: Total average adjusted fitness ({total_average_fitness:.2f}) is zero or negative. Allocating offspring equally among {len(species_data)} species.")
             num_species = len(species_data)
             if num_species > 0:
                 offspring_per_species = self.size // num_species
@@ -1762,9 +2040,9 @@ class Population:
 
             # Check if selection pool is valid
             if not selection_pool:
-                 # Fallback: If pool is empty
-                 # Use the best member as parent or create random genomes if needed.
-                 print(f"Warning: Selection pool empty for species {species.representative.id if species.representative else 'N/A'} despite {num_offspring} offspring needed. Using fallback.")
+                 # Fallback: If pool is empty (e.g., species has few members and high elite count)
+                 # Use the best member(s) as parent(s) or create random genomes if needed.
+                 # print(f"Warning: Selection pool empty for species {species.representative.id if species.representative else 'N/A'} despite {num_offspring} offspring needed. Using fallback.")
                  # Simple fallback: use the best available member if possible
                  parent_fallback = ranked_members[0] if ranked_members else None
                  for _ in range(num_remaining_offspring):
@@ -1813,9 +2091,9 @@ class Population:
 
 
         # --- Finalize Population ---
-        # Ensure population size is maintained
+        # Ensure population size is maintained (address potential over/under allocation due to rounding/fallbacks)
         while len(new_pop) < self.size:
-            print(f"Population shortfall detected. Current size: {len(new_pop)}, Target: {self.size}. Adding random genome.")
+            # print(f"Population shortfall detected. Current size: {len(new_pop)}, Target: {self.size}. Adding random genome.")
             # Add new random genomes to fill the gap
             new_pop.append(Genome(self, self.genome_shape, config=self.config))
 
@@ -1824,6 +2102,8 @@ class Population:
 
         # --- Speciate the New Population ---
         # Clear old species assignments (keep representatives temporarily)
+        # Store old representatives to potentially reuse if species survives
+        old_representatives = {s: s.representative for s in self.species}
         for s in self.species:
             s.members = [] # Clear members list for each species
 
@@ -1831,16 +2111,22 @@ class Population:
         for genome in self.members:
             self.speciate(genome) # Assign genome to a species (finds compatible or creates new)
 
-        # Clean up species: remove empty ones, reset representatives if needed
+        # Clean up species: remove empty ones, ensure valid representatives
         self.species = [s for s in self.species if s.members] # Keep only species with members
-        # Optionally, re-select representatives for remaining species (e.g., randomly from members)
+        # Try to maintain original representatives if they survived and are still in the species
+        # Otherwise, choose a new representative randomly
         for s in self.species:
-            if not s.representative or s.representative not in s.members:
-                # If representative is gone or invalid, choose a new one randomly
-                if s.members:
-                    s.representative = choice(s.members)
-                else:
-                    s.representative = None
+            original_rep = old_representatives.get(s)
+            if original_rep and original_rep in s.members:
+                 s.representative = original_rep # Keep old representative if still valid
+            elif s.members:
+                 s.representative = choice(s.members) # Choose a new random one
+            else:
+                 s.representative = None # Should not happen if cleanup worked, but safe default
+
+
+        # Adjust species compatibility threshold based on the new species count
+        self.adjust_species_threshold()
 
     def gather_population(self):
         """
