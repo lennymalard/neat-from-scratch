@@ -242,7 +242,7 @@ def training_loop(generations=100, pop_size=200, viz_step=10, num_processes=8):
         pop.reproduce()
 
     best = pop.get_top_genome()
-    print(f"Finished. Best fit: {best.fitness}")
+    print(f"Finished. Best fitness: {best.fitness}")
     return best
 
 if __name__ == '__main__':
