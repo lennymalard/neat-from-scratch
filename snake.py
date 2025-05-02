@@ -219,6 +219,7 @@ def training_loop(generations=100, pop_size=200, viz_step=10, num_processes=8):
         hid_node_activation='relu',
         out_node_activation='sigmoid'
     )
+    print(config)
     pop = Population(config=config)
     avg_fitness, top_fitness = [], []
 
@@ -241,9 +242,9 @@ def training_loop(generations=100, pop_size=200, viz_step=10, num_processes=8):
             plt.legend(['Avg','Top']); plt.xlabel('Gen'); plt.ylabel('Fitness'); plt.show()
         pop.reproduce()
 
-    best = pop.get_top_genome()
-    print(f"Finished. Best fitness: {best.fitness}")
-    return best
+    top_genome = pop.get_top_genome()
+    print(f"Finished. Best fitness: {top_genome.fitness}")
+    return top_genome
 
 if __name__ == '__main__':
     best = training_loop(generations=100, pop_size=500, viz_step=10, num_processes=8)

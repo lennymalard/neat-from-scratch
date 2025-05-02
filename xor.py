@@ -33,6 +33,7 @@ def run_xor_experiment(num_gens=100, pop_size=100):
     fitnesses = []
     avg_fitness = 0
     top_fitness = 0
+
     for gen in range(num_gens):
         for genome in population.members:
             fitness = evaluate_genome(genome)
@@ -41,6 +42,7 @@ def run_xor_experiment(num_gens=100, pop_size=100):
         avg_fitness = sum(fitnesses) / len(fitnesses)
         print(f"Gen {gen+1} | Average fitness: {avg_fitness} | Top fitness: {top_fitness} ")
         population.reproduce()
+
     top_genome = population.get_top_genome()
     return top_genome, avg_fitness, top_fitness
 
