@@ -234,8 +234,8 @@ def training_loop(generations=100, pop_size=200, viz_step=10, num_processes=8):
         print(f"Avg: {avg:.2f}, Top: {top:.2f}")
         if (gen+1)%viz_step==0 or gen+1==generations:
             print(f"Visualizing gen {gen+1}")
-            best = max(pop.members, key=lambda g: g.fitness)
-            neat_play(best)
+            top_genome = pop.get_top_genome()
+            neat_play(top_genome)
             plt.figure()
             plt.plot(range(1, len(avg_fitness)+1), avg_fitness)
             plt.plot(range(1, len(top_fitness)+1), top_fitness)
