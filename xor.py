@@ -29,7 +29,7 @@ def run_xor_experiment(num_gens=100, pop_size=100):
         perturb_prob=0.8,
         reset_prob=0.1,
         species_threshold=1.0,
-        adaptive_threshold=0.0025,
+        adaptive_threshold=0.01,
         target_species_number=10,
         num_elites=1,
         selection_share=0.10,
@@ -46,7 +46,8 @@ def run_xor_experiment(num_gens=100, pop_size=100):
             fitnesses.append(fitness)
         top_fitness = max(fitnesses)
         avg_fitness = sum(fitnesses) / len(fitnesses)
-        print(f"Gen {gen+1} | Average fitness: {avg_fitness} | Top fitness: {top_fitness} ")
+        species_number = len(population.species)
+        print(f"Gen {gen+1} | Average fitness: {avg_fitness} | Top fitness: {top_fitness} | Species number: {species_number}")
         population.reproduce()
 
     top_genome = population.get_top_genome()
@@ -58,3 +59,4 @@ if __name__ == '__main__':
     for x1, x2, target in XOR_TABLE:
         output = top_genome.forward([x1, x2, 1.0])[0]
         print(f" Input: {[x1, x2, 1.0]} -> Predicted: {output:.3f}   (target {target})")
+
