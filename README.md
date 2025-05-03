@@ -117,7 +117,7 @@ Two examples are provided to demonstrate the usage of this NEAT implementation:
     *   A more complex control task where NEAT evolves an agent to play the game of Snake.
     *   Features two types of input representations for the snake:
         *   Absolute state (danger left/right/forward, apple direction, current direction).
-        *   Ray casting vision (detecting wall/body/apple in 8 directions). (Selectable via `use_ray_cast` flag in `SnakeGame`).
+        *   Ray casting vision (detecting wall/body/apple in 8 directions). Selectable via `use_ray_cast` flag in `SnakeGame`.
     *   Includes a Pygame visualization (`neat_play`) to watch the best genome from each specified generation interval play the game.
     *   Uses `multiprocessing` for parallel fitness evaluation, significantly speeding up training.
     *   Run using: `python snake.py`
