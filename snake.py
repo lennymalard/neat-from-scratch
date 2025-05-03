@@ -119,7 +119,6 @@ class SnakeGame:
             vision.extend(self.ray_cast(head_r, head_c, dr, dc))
         return vision
 
-    # original absolute get_state
     def get_state(self):
         head_r, head_c = self.snake.body[-1]
         apple_r, apple_c = self.apple
