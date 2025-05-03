@@ -1,17 +1,17 @@
 from neat import *
 
 XOR_TABLE = [
-    (0,0,0),
-    (0,1,1),
-    (1,0,1),
-    (1,1,0),
+    (0.0,0.0,0.0),
+    (0.0,1.0,1.0),
+    (1.0,0.0,1.0),
+    (1.0,1.0,0.0),
 ]
 
 def evaluate_genome(genome):
     error = 0
     for x1, x2, target in XOR_TABLE:
         output = genome.forward([x1, x2, 1.0])
-        error += abs(target - output[0])
+        error += (target - output[0])**2
     genome.fitness = 4.0 - error
     return genome.fitness
 
@@ -21,14 +21,16 @@ def run_xor_experiment(num_gens=100, pop_size=100):
         population_size=pop_size,
         out_node_activation='sigmoid',
         hid_node_activation='relu',
-        add_node_mutation_prob=0.03,
-        add_conn_mutation_prob=0.05,
-        sigma=0.1,
+        add_node_mutation_prob=0.3,
+        add_conn_mutation_prob=0.4,
+        remove_node_mutation_prob=0.05,
+        remove_conn_mutation_prob=0.08,
+        sigma=0.15,
         perturb_prob=0.8,
         reset_prob=0.1,
-        species_threshold=3.0,
-        num_elites=2,
-        selection_share=0.15,
+        species_threshold=1.0,
+        num_elites=1,
+        selection_share=0.10,
     )
     print(config)
     population = Population(config=config)
