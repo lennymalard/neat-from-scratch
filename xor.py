@@ -19,14 +19,16 @@ def run_xor_experiment(num_gens=100, pop_size=100):
     config = NEATConfig(
         genome_shape=(3, 1),
         population_size=pop_size,
-        add_node_mutation_prob=0.05,
-        add_conn_mutation_prob=0.08,
+        out_node_activation='sigmoid',
+        hid_node_activation='relu',
+        add_node_mutation_prob=0.03,
+        add_conn_mutation_prob=0.05,
         sigma=0.1,
         perturb_prob=0.8,
         reset_prob=0.1,
         species_threshold=3.0,
-        num_elites=1,
-        selection_share=0.2,
+        num_elites=2,
+        selection_share=0.15,
     )
     print(config)
     population = Population(config=config)
@@ -47,8 +49,8 @@ def run_xor_experiment(num_gens=100, pop_size=100):
     return top_genome, avg_fitness, top_fitness
 
 if __name__ == '__main__':
-    top_genome, avg_fitness, top_fitness = run_xor_experiment(num_gens=100, pop_size=500)
+    top_genome, avg_fitness, top_fitness = run_xor_experiment(num_gens=150, pop_size=500)
     print("\n=== Testing Best Genome ===")
     for x1, x2, target in XOR_TABLE:
         output = top_genome.forward([x1, x2, 1.0])[0]
-        print(f" Input: {[x1, x2, 1.0]} → Predicted: {output:.3f}   (target {target})")
+        print(f" Input: {[x1, x2, 1.0]} -> Predicted: {output:.3f}   (target {target})")
