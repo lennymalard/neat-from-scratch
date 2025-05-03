@@ -1,5 +1,10 @@
 # NEAT Algorithm from Scratch in Python
 
+ 
+<p align="center">
+  <img src="/assets/snake_playing.gif" alt="GIF" />
+</p>
+
 ![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/lennymalard/neat-from-scratch/blob/main/LICENSE)
 
