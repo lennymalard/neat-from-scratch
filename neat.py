@@ -499,8 +499,6 @@ class Genome:
                 new_conn.in_node = new_nodes.get(conn.in_node.id)
                 new_conn.out_node = new_nodes.get(conn.out_node.id)
                 new_conns[conn_id] = new_conn
-            # else: connection involves a node not present in self.nodes, skip copying it
-            # This case should ideally not happen if genome structure is consistent.
 
         # Create the new Genome instance with copied components
         copied_genome = Genome(self.population, shape=(1, 1), connections=new_conns, nodes=new_nodes, config=self.config)
@@ -740,7 +738,6 @@ class Genome:
                             return True
                     elif rec_stack[neighbor]: # If neighbor is already in recursion stack -> cycle detected
                         return True
-                # else: neighbor node ID not in temp_nodes, shouldn't happen with current setup
 
             # Remove node from recursion stack as we backtrack
             rec_stack[node_id] = False
@@ -1182,7 +1179,6 @@ class Genome:
                         pred_node = self.nodes.get(pred_node_id)
                         if pred_node: # Safety check for predecessor node
                              weighted_sum += pred_node.value * conn.weight
-                        # else: print warning about missing predecessor ? I will see in next reviews if it is important atm.
 
                 # Apply activation function if defined
                 if node.activation:
@@ -1714,8 +1710,6 @@ class Population:
                 if not conn1.enabled or not conn2.enabled:
                     if random() < 0.75: # Probability to inherit disabled status
                         chosen_conn_gene.enabled = False
-                    # else: it might become enabled (inherited from the choice, or remains enabled)
-            # else: If nodes don't exist (e.g. complex scenario after node deletion), skip this conn
 
         # Inherit disjoint and excess genes directly from the fitter parent (genome1)
         for conn in disjoint1 + excess1:
@@ -1726,7 +1720,6 @@ class Population:
                 new_conn.in_node = offspring_nodes.get(new_conn.in_node.id)
                 new_conn.out_node = offspring_nodes.get(new_conn.out_node.id)
                 offspring_connections[new_conn.id] = new_conn
-            # else: Skip if nodes don't exist
 
         # Create the offspring genome instance
         offspring = Genome(self, connections=offspring_connections, nodes=offspring_nodes, config=self.config)
@@ -2009,7 +2002,6 @@ class Population:
                 # Assign base number + distribute remainder
                 for i, data in enumerate(species_data):
                     data['num_offspring'] = offspring_per_species + (1 if i < remainder else 0)
-            # else: If species_data is empty (already handled above), this block is skipped
 
         # --- Generate New Population ---
         for data in species_data:
